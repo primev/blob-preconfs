@@ -39,6 +39,14 @@ func CreateSignedBid(amountWei *big.Int, l1Block *big.Int, privateKey *ecdsa.Pri
 	}, nil
 }
 
+func MustCreateSignedBid(amountWei *big.Int, l1Block *big.Int, privateKey *ecdsa.PrivateKey) *SignedBid {
+	bid, err := CreateSignedBid(amountWei, l1Block, privateKey)
+	if err != nil {
+		log.Fatalf("Error creating signed bid: %v", err)
+	}
+	return bid
+}
+
 func (b *SignedBid) Verify() bool {
 	hash := getDataHash(b.AmountWei, b.L1Block)
 	sigPublicKey, err := crypto.SigToPub(hash.Bytes(), b.Signature)
