@@ -2,6 +2,7 @@ package listener
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"math/big"
 	"os"
@@ -10,12 +11,12 @@ import (
 	"blob-preconfs/pkg/auction"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/ethclient"
 )
 
 type Listener struct {
-	logger    *slog.Logger
-	ethClient *ethclient.Client
+	logger        *slog.Logger
+	ethClient     EthClient
+	relayRegistry auction.RelayRegistry
 
 	DoneChan     chan struct{}
 	NewBlockChan chan *big.Int
@@ -26,15 +27,24 @@ type Listener struct {
 	currentAuction  *auction.RelayAuction
 }
 
+type EthClient interface {
+	BlockNumber(ctx context.Context) (uint64, error)
+}
+
 func NewListener(
 	logger *slog.Logger,
-	client *ethclient.Client,
+	client EthClient,
+	relayRegistry auction.RelayRegistry,
 ) *Listener {
 	return &Listener{
-		logger:          logger,
-		ethClient:       client,
-		DoneChan:        make(chan struct{}),
-		NewBlockChan:    make(chan *big.Int),
+		logger:        logger,
+		ethClient:     client,
+		relayRegistry: relayRegistry,
+
+		DoneChan:       make(chan struct{}),
+		NewBlockChan:   make(chan *big.Int),
+		AuctionWonChan: make(chan auction.SignedBid),
+
 		currentBlockNum: 0,
 		currentAuction:  nil,
 	}
@@ -62,8 +72,6 @@ func (l *Listener) listenForBlocks(ctx context.Context) {
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
 
-	l.currentBlockNum = l.mustGetBlockNum()
-
 	for {
 		select {
 		case <-ctx.Done():
@@ -71,18 +79,19 @@ func (l *Listener) listenForBlocks(ctx context.Context) {
 			return
 		case <-ticker.C:
 		}
-		if l.mustGetBlockNum() > l.currentBlockNum {
+		newBlockNum := l.MustGetBlockNum()
+		if newBlockNum > l.currentBlockNum {
 			l.logger.Info("new block. Signal to block processor will be sent",
 				"blockNumber", l.currentBlockNum)
 			l.NewBlockChan <- big.NewInt(int64(l.currentBlockNum))
-			l.currentBlockNum++
+			l.currentBlockNum = newBlockNum
 		} else {
 			l.logger.Debug("no new block. Continuing...")
 		}
 	}
 }
 
-func (l *Listener) mustGetBlockNum() uint64 {
+func (l *Listener) MustGetBlockNum() uint64 {
 	blockNumber, err := l.ethClient.BlockNumber(context.Background())
 	if err != nil {
 		l.logger.Error("failed to get block number", "error", err)
@@ -104,18 +113,9 @@ func (l *Listener) processNewBlocks(ctx context.Context) {
 	}
 }
 
-// TODO: Implement tie-in to settlement layer
-type relayRegistry struct {
-	ethclient.Client
-}
-
-func (r *relayRegistry) IsRegisteredOnSettlementLayer(relayAddress common.Address) bool {
-	return true
-}
-
 func (l *Listener) FacilitateRelayAuction() {
 
-	relayAuction := auction.NewRelayAuction(l.logger, &relayRegistry{})
+	relayAuction := auction.NewRelayAuction(l.logger, l.relayRegistry)
 	l.currentAuction = relayAuction
 	defer func() {
 		l.currentAuction = nil
@@ -140,6 +140,18 @@ func (l *Listener) FacilitateRelayAuction() {
 		l.logger.Error("relay auction did not end before deadline", "error", "timeout")
 		os.Exit(1)
 	}
+}
+
+// To satisfy bid submissions from relays
+func (l *Listener) SubmitBid(bid auction.SignedBid) error {
+	if l.currentAuction == nil {
+		return fmt.Errorf("no auction in progress")
+	}
+	if bid.L1Block.Uint64() != l.currentBlockNum {
+		return fmt.Errorf("bid is for a different block")
+	}
+	l.currentAuction.SubmitBid(bid)
+	return nil
 }
 
 // To satisfy RPC requests for current winning bid, enabling open auction.
