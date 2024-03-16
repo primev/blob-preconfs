@@ -2,7 +2,9 @@ package auction
 
 import (
 	"crypto/ecdsa"
+	"encoding/json"
 	"fmt"
+	"log"
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -10,7 +12,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 )
 
-// To be sent over wire
+// To be sent over wire, see codec below
 type SignedBid struct {
 	AmountWei *big.Int       `json:"amountWei"`
 	L1Block   *big.Int       `json:"l1Block"`
@@ -45,6 +47,24 @@ func (b *SignedBid) Verify() bool {
 	}
 	signerAddress := crypto.PubkeyToAddress(*sigPublicKey)
 	return signerAddress == b.Address
+}
+
+func EncodeSignedBid(bid *SignedBid) string {
+	jsonData, err := json.Marshal(bid)
+	if err != nil {
+		log.Fatalf("Error encoding SignedBid to JSON: %v", err)
+	}
+	return string(jsonData)
+}
+
+func DecodeSignedBid(jsonData string) (*SignedBid, error) {
+	var bid SignedBid
+	err := json.Unmarshal([]byte(jsonData), &bid)
+	if err != nil {
+		log.Printf("Error decoding JSON to SignedBid: %v", err)
+		return nil, err
+	}
+	return &bid, nil
 }
 
 func getDataHash(amountWei *big.Int, l1Block *big.Int) common.Hash {
