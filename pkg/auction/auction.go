@@ -62,11 +62,13 @@ func (r *RelayAuction) runAuction(ctx context.Context, biddingPeriod time.Durati
 			return
 		case <-auctionTimer.C:
 			r.currentBidMutex.Lock()
+			r.logger.Info("auction ended, winner", "bid", r.currentBid)
 			r.auctionResultChan <- r.currentBid
 			r.currentBidMutex.Unlock()
 			return
 		case bid := <-r.bidSubmissionChan:
 			r.currentBidMutex.Lock()
+			r.logger.Info("new bid received, it will be evaluated", "bid", bid)
 			r.evaluateBid(bid)
 			r.currentBidMutex.Unlock()
 		}
@@ -98,6 +100,7 @@ func (r *RelayAuction) evaluateBid(bid SignedBid) {
 	}
 
 	if r.currentBid == nil || bid.AmountWei.Cmp(r.currentBid.AmountWei) > 0 {
+		r.logger.Info("new highest bid", "bid", bid)
 		r.currentBid = &bid
 	}
 }
