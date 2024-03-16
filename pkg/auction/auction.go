@@ -15,14 +15,21 @@ type RelayAuction struct {
 	currentBid        *SignedBid
 	currentBidMutex   sync.RWMutex
 	auctionResultChan chan *SignedBid
+	relayRegistry     RelayRegistry
 }
 
-func NewRelayAuction(logger *slog.Logger) *RelayAuction {
+func NewRelayAuction(logger *slog.Logger, relayRegistry RelayRegistry) *RelayAuction {
 	return &RelayAuction{
 		logger:            logger,
 		bidSubmissionChan: make(chan SignedBid, 10),
 		auctionResultChan: make(chan *SignedBid),
+		relayRegistry:     relayRegistry,
 	}
+}
+
+// To inject custom logic for checking if a relay is registered/prepaid on the settlement layer
+type RelayRegistry interface {
+	IsRegisteredOnSettlementLayer(address common.Address) bool
 }
 
 func (r *RelayAuction) StartAsync(ctx context.Context, biddingPeriod time.Duration,
@@ -66,6 +73,7 @@ func (r *RelayAuction) runAuction(ctx context.Context, biddingPeriod time.Durati
 	}
 }
 
+// TODO: populate addresses
 var relayWhitelist = []common.Address{
 	common.HexToAddress("0xAddress1"),
 	common.HexToAddress("0xAddress2"),
@@ -84,7 +92,10 @@ func (r *RelayAuction) evaluateBid(bid SignedBid) {
 		return
 	}
 
-	// TODO: check if bidder is registered on sl via hook
+	if !r.relayRegistry.IsRegisteredOnSettlementLayer(bid.Address) {
+		r.logger.Warn("bidder not registered or prepaid on settlement layer", "bid", bid)
+		return
+	}
 
 	if r.currentBid == nil || bid.AmountWei.Cmp(r.currentBid.AmountWei) > 0 {
 		r.currentBid = &bid

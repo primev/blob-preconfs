@@ -10,6 +10,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 )
 
+// To be sent over wire
 type SignedBid struct {
 	AmountWei *big.Int       `json:"amountWei"`
 	L1Block   *big.Int       `json:"l1Block"`
@@ -17,6 +18,7 @@ type SignedBid struct {
 	Signature hexutil.Bytes  `json:"signature"`
 }
 
+// To be used by relay account to sign bid for a certain amount and l1Block
 func CreateSignedBid(amountWei *big.Int, l1Block *big.Int, privateKey *ecdsa.PrivateKey) (*SignedBid, error) {
 	hash := getDataHash(amountWei, l1Block)
 	signature, err := crypto.Sign(hash.Bytes(), privateKey)
